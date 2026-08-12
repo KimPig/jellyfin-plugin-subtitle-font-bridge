@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Jellyfin.Plugin.SubtitleFontBridge/Jellyfin.Plugin.SubtitleFontBridge.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Jellyfin.Plugin.SubtitleFontBridge.Tests/Jellyfin.Plugin.SubtitleFontBridge.Tests.csproj" />
+  </Folder>
+</Solution>

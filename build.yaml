@@ -1,0 +1,16 @@
+---
+name: "Subtitle Font Bridge"
+guid: "81ea0bd3-d8e0-4f4a-b680-bf8b83a673f7"
+version: "1.0.0.0"
+targetAbi: "12.0.0.0"
+framework: "net10.0"
+overview: "A Jellyfin plugin for Windows servers that supplies Jellyfin Web with the fonts referenced by ASS/SSA subtitles."
+description: >
+  A Jellyfin plugin for Windows servers that supplies Jellyfin Web with the
+  fonts referenced by ASS/SSA subtitles.
+category: "Subtitles"
+owner: "KimPig"
+artifacts:
+- "Jellyfin.Plugin.SubtitleFontBridge.dll"
+changelog: |-
+  - Initial Jellyfin 12 implementation.

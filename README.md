@@ -11,6 +11,13 @@ from the operating system font manager only when a family is requested. TTF,
 OTF, WOFF, WOFF2, and TTC resources are identified by a SHA-256 content id, so
 multiple faces from the same TTC collection are sent only once.
 
+## Required Jellyfin Web
+
+This plugin does not work with the stock Jellyfin Web client by itself. It
+requires [KimPig's customized Jellyfin Web](https://github.com/KimPig/jellyfin-web),
+which includes the client-side integration for Subtitle Font Bridge. Install
+the customized Web build and this server plugin together.
+
 ## Compatibility
 
 - Jellyfin Server 12 (`targetAbi: 12.0.0.0`)

@@ -93,6 +93,18 @@ artifacts/SubtitleFontBridge_12.0.0.0.zip
 The ZIP contains `Jellyfin.Plugin.SubtitleFontBridge.dll` and `meta.json`. Jellyfin
 supplies the controller, model, ASP.NET Core, and SkiaSharp runtime assemblies.
 
+## Catalog installation
+
+Add the shared KimPig plugin repository in **Dashboard > Plugins > Repositories**:
+
+```text
+https://raw.githubusercontent.com/KimPig/jellyfin-plugin-repository/main/manifest.json
+```
+
+Use `KimPig Jellyfin Plugins` as the repository name. After saving it, open the
+plugin catalog, install Subtitle Font Bridge, and restart Jellyfin Server.
+The same catalog also provides Attachment Optimizer.
+
 ## Manual installation
 
 1. Stop Jellyfin Server.

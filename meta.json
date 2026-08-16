@@ -1,0 +1,16 @@
+{
+  "category": "Subtitles",
+  "changelog": "- Resolve ASS/SSA font families from server-installed fonts.\n- Index multilingual OpenType family aliases from name IDs 1 and 16.\n- Package DLL and complete Jellyfin metadata.",
+  "description": "Supplies compatible Jellyfin Web builds with server-installed fonts referenced by ASS/SSA subtitles, including multilingual OpenType family aliases.",
+  "guid": "81ea0bd3-d8e0-4f4a-b680-bf8b83a673f7",
+  "name": "Subtitle Font Bridge",
+  "overview": "Resolve ASS/SSA font families from server-installed OpenType fonts.",
+  "owner": "KimPig",
+  "targetAbi": "12.0.0.0",
+  "timestamp": "2026-08-16T06:30:00.0000000Z",
+  "version": "1.0.0.0",
+  "status": "Active",
+  "autoUpdate": false,
+  "imagePath": null,
+  "assemblies": []
+}

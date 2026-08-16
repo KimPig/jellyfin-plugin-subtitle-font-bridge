@@ -9,7 +9,7 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $projectRoot "src\Jellyfin.Plugin.SubtitleFontBridge\Jellyfin.Plugin.SubtitleFontBridge.csproj"
 $publishDirectory = Join-Path $projectRoot "artifacts\publish"
-$archive = Join-Path $projectRoot "artifacts\Jellyfin.Plugin.SubtitleFontBridge_1.0.0.0.zip"
+$archive = Join-Path $projectRoot "artifacts\SubtitleFontBridge_1.0.0.0.zip"
 
 & $DotnetPath publish $project `
     --configuration $Configuration `
@@ -26,7 +26,11 @@ if (-not (Test-Path -LiteralPath $pluginAssembly -PathType Leaf)) {
 }
 
 New-Item -ItemType Directory -Path (Split-Path -Parent $archive) -Force | Out-Null
-Compress-Archive -LiteralPath $pluginAssembly -DestinationPath $archive -Force
+$packageFiles = @(
+    $pluginAssembly,
+    (Join-Path $projectRoot "meta.json")
+)
+Compress-Archive -LiteralPath $packageFiles -DestinationPath $archive -Force
 
 $hash = Get-FileHash -LiteralPath $archive -Algorithm SHA256
 [pscustomobject]@{

@@ -1,14 +1,22 @@
 # Subtitle Font Bridge
 
-A Jellyfin plugin for Windows servers that supplies Jellyfin Web with the fonts referenced by ASS/SSA subtitles.
+A Jellyfin plugin that supplies Jellyfin Web with server-hosted fonts referenced by ASS/SSA subtitles.
 
 `Jellyfin.Plugin.SubtitleFontBridge` reads a selected subtitle stream, extracts only the font families
-referenced by its styles and inline `\\fn` overrides, and exposes matching fonts
-installed on the server through authenticated HTTP endpoints.
+referenced by its styles and inline `\fn` overrides, and exposes matching fonts
+available to the server through authenticated HTTP endpoints.
+
+The catalog scans TTF, OTF, TTC, and OTC files and reads every OpenType
+`Font Family` (name ID 1) and `Typographic Family` (name ID 16) record across
+all platforms and languages. This allows an ASS name such as a localized Korean
+family alias to resolve even when SkiaSharp exposes only the English family
+name. Names are normalized with Unicode Form KC, whitespace collapsing,
+case-insensitive comparison, and removal of the vertical-font `@` prefix.
 
 The plugin does not copy fonts into its data directory. Font bytes are opened
-from the operating system font manager only when a family is requested. TTF,
-OTF, WOFF, WOFF2, and TTC resources are identified by a SHA-256 content id, so
+from their original server path only when a family is requested. TTF, OTF,
+TTC, and OTC files discovered from disk, plus resources available only through
+the platform font manager, are identified by a SHA-256 content id, so
 multiple faces from the same TTC collection are sent only once.
 
 ## Required Jellyfin Web
@@ -25,9 +33,15 @@ the customized Web build and this server plugin together.
 - Built against `Jellyfin.Controller` and `Jellyfin.Model` 12.0.0-rc5
 - Built against the SkiaSharp 3.119.4 already bundled with Jellyfin 12
 
-The catalog works with the fonts visible to the Jellyfin server process. On
-Windows, that includes machine fonts and user fonts visible to the account that
-runs Jellyfin. Restart Jellyfin after installing or removing fonts.
+The catalog checks these standard locations for the account running Jellyfin:
+
+- Windows: `%WINDIR%\Fonts` and `%LOCALAPPDATA%\Microsoft\Windows\Fonts`
+- Linux: `/usr/share/fonts`, `/usr/local/share/fonts`,
+  `~/.local/share/fonts`, and `~/.fonts`
+- macOS: `/System/Library/Fonts`, `/Library/Fonts`, and `~/Library/Fonts`
+
+SkiaSharp remains a fallback for platform fonts that do not have a directly
+enumerable file. Restart Jellyfin after installing or removing fonts.
 
 ## API
 
@@ -73,18 +87,18 @@ powershell -ExecutionPolicy Bypass -File .\scripts\package.ps1
 The packaging script creates:
 
 ```text
-artifacts/Jellyfin.Plugin.SubtitleFontBridge_1.0.0.0.zip
+artifacts/SubtitleFontBridge_1.0.0.0.zip
 ```
 
-The ZIP contains only `Jellyfin.Plugin.SubtitleFontBridge.dll`. Jellyfin supplies the
-controller, model, ASP.NET Core, and SkiaSharp runtime assemblies.
+The ZIP contains `Jellyfin.Plugin.SubtitleFontBridge.dll` and `meta.json`. Jellyfin
+supplies the controller, model, ASP.NET Core, and SkiaSharp runtime assemblies.
 
 ## Manual installation
 
 1. Stop Jellyfin Server.
 2. Create a versioned directory below Jellyfin's plugin directory, for example
    `plugins/Subtitle Font Bridge_1.0.0.0`.
-3. Extract `Jellyfin.Plugin.SubtitleFontBridge.dll` into that directory.
+3. Extract `Jellyfin.Plugin.SubtitleFontBridge.dll` and `meta.json` into that directory.
 4. Start Jellyfin and check `GET SubtitleFontBridge/Status` as an administrator.
 
 For the default Windows data path, the plugin root is normally:
@@ -108,8 +122,9 @@ C:\ProgramData\Jellyfin\Server\plugins
 ## Current scope
 
 This first version deliberately has no configuration page and no persistent
-font cache. The first request for a family hashes its matching font files on the
-request thread; later requests during the same server session reuse that result.
-This keeps startup fast, but the first playback that references several large
-CJK fonts can take longer. Adding bounded background indexing, allow/deny lists,
-and a Web client integration are separate follow-up changes.
+font cache. The first request builds the lightweight OpenType name index and
+hashes only the files matching the requested family; later requests during the
+same server session reuse both results. This keeps startup fast while avoiding
+the platform font manager's localized-name limitation. Adding bounded
+background indexing, custom font directories, and allow/deny lists are separate
+follow-up changes.

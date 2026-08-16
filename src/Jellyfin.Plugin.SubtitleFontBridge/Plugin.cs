@@ -36,7 +36,7 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>
 
     /// <inheritdoc />
     public override string Description =>
-        "A Jellyfin plugin for Windows servers that supplies Jellyfin Web with the fonts referenced by ASS/SSA subtitles.";
+        "Supplies Jellyfin Web with server-hosted fonts referenced by ASS/SSA subtitles.";
 
     /// <inheritdoc />
     public override Guid Id => PluginId;

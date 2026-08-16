@@ -19,7 +19,11 @@ public sealed class SystemFontCatalog : ISystemFontCatalog, IDisposable
 
     private readonly ILogger<SystemFontCatalog> _logger;
     private readonly SKFontManager _fontManager;
+    private readonly Lazy<OpenTypeFontIndex> _openTypeIndex;
+    private readonly bool _includePlatformFallback;
     private readonly ConcurrentDictionary<string, Lazy<CachedFamily>> _families =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, Lazy<CachedOpenTypeFile>> _openTypeFiles =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, FontSource> _sources =
         new(StringComparer.OrdinalIgnoreCase);
@@ -29,12 +33,30 @@ public sealed class SystemFontCatalog : ISystemFontCatalog, IDisposable
     /// Initializes a new instance of the <see cref="SystemFontCatalog"/> class.
     /// </summary>
     public SystemFontCatalog(ILogger<SystemFontCatalog> logger)
+        : this(logger, OpenTypeFontIndex.GetDefaultFontDirectories(), includePlatformFallback: true)
+    {
+    }
+
+    internal SystemFontCatalog(
+        ILogger<SystemFontCatalog> logger,
+        IEnumerable<string> fontDirectories,
+        bool includePlatformFallback)
     {
         _logger = logger;
         _fontManager = SKFontManager.CreateDefault();
+        _includePlatformFallback = includePlatformFallback;
+        var directories = fontDirectories
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Select(Path.GetFullPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        _openTypeIndex = new Lazy<OpenTypeFontIndex>(
+            () => OpenTypeFontIndex.Build(directories, _logger),
+            LazyThreadSafetyMode.ExecutionAndPublication);
         _logger.LogInformation(
-            "Subtitle Font Bridge initialized with {FamilyCount} visible font families",
-            _fontManager.FontFamilyCount);
+            "Subtitle Font Bridge initialized with {FamilyCount} platform font families and {DirectoryCount} font directories",
+            _fontManager.FontFamilyCount,
+            directories.Length);
     }
 
     /// <inheritdoc />
@@ -122,6 +144,33 @@ public sealed class SystemFontCatalog : ISystemFontCatalog, IDisposable
             .ToArray();
         foreach (var candidate in candidates)
         {
+            if (candidate.FilePath is not null)
+            {
+                try
+                {
+                    var fileStream = new FileStream(
+                        candidate.FilePath,
+                        FileMode.Open,
+                        FileAccess.Read,
+                        FileShare.ReadWrite | FileShare.Delete);
+                    resource = new SystemFontResource(
+                        fileStream,
+                        candidate.Id,
+                        candidate.FileName,
+                        candidate.ContentType,
+                        candidate.Size);
+                    return true;
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    _logger.LogWarning(
+                        exception,
+                        "Unable to open indexed OpenType font {FontId}",
+                        fontId);
+                    continue;
+                }
+            }
+
             SKFontStyleSet? styleSet = null;
             SKTypeface? typeface = null;
             SKStreamAsset? stream = null;
@@ -195,7 +244,7 @@ public sealed class SystemFontCatalog : ISystemFontCatalog, IDisposable
                 continue;
             }
 
-            var family = value.Trim().TrimStart('@').Trim();
+            var family = OpenTypeFontIndex.NormalizeFamilyName(value);
             if (family.Length == 0)
             {
                 continue;
@@ -227,6 +276,16 @@ public sealed class SystemFontCatalog : ISystemFontCatalog, IDisposable
     {
         try
         {
+            var openTypeFiles = BuildOpenTypeFamily(family);
+            if (openTypeFiles.Count > 0 || !_includePlatformFallback)
+            {
+                _logger.LogDebug(
+                    "Resolved OpenType font alias {Family} to {FileCount} unique files",
+                    family,
+                    openTypeFiles.Count);
+                return new CachedFamily(openTypeFiles);
+            }
+
             using var styleSet = _fontManager.GetFontStyles(family);
             if (styleSet.Count == 0)
             {
@@ -302,11 +361,74 @@ public sealed class SystemFontCatalog : ISystemFontCatalog, IDisposable
                 files.Count);
             return new CachedFamily(files.Values.Select(static builder => builder.Build()).ToArray());
         }
-        catch (Exception exception) when (exception is InvalidOperationException or IOException)
+        catch (Exception exception) when (exception is InvalidOperationException
+                                           or IOException
+                                           or UnauthorizedAccessException)
         {
             _logger.LogWarning(exception, "Unable to resolve system font family {Family}", family);
             return new CachedFamily([]);
         }
+    }
+
+    private IReadOnlyList<SystemFontFileDto> BuildOpenTypeFamily(string family)
+    {
+        var files = new Dictionary<string, FontFileBuilder>(StringComparer.OrdinalIgnoreCase);
+        foreach (var indexedFont in _openTypeIndex.Value.Find(family))
+        {
+            var cached = _openTypeFiles.GetOrAdd(
+                indexedFont.Path,
+                _ => new Lazy<CachedOpenTypeFile>(
+                    () => BuildOpenTypeFile(indexedFont),
+                    LazyThreadSafetyMode.ExecutionAndPublication)).Value;
+
+            _sources.TryAdd(CreateSourceKey(cached.Source.Id, cached.Source), cached.Source);
+            if (!files.TryGetValue(cached.File.Id, out var builder))
+            {
+                builder = new FontFileBuilder(cached.File);
+                files.Add(cached.File.Id, builder);
+            }
+            else
+            {
+                builder.AddFaces(cached.File.Faces);
+            }
+        }
+
+        return files.Values.Select(static builder => builder.Build()).ToArray();
+    }
+
+    private CachedOpenTypeFile BuildOpenTypeFile(OpenTypeFontIndex.IndexedOpenTypeFont indexedFont)
+    {
+        using var stream = new FileStream(
+            indexedFont.Path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        var inspected = InspectStream(stream);
+        var fileName = inspected.Id + "." + inspected.Extension;
+        var faces = indexedFont.Faces.Select(static face => new FontFaceDto(
+            face.FamilyNames.FirstOrDefault() ?? string.Empty,
+            string.Empty,
+            null,
+            400,
+            5,
+            "Upright",
+            face.CollectionIndex)).ToArray();
+        var file = new SystemFontFileDto(
+            inspected.Id,
+            fileName,
+            Plugin.ApiRoute + "/Files/" + fileName,
+            inspected.ContentType,
+            inspected.Size,
+            faces);
+        var source = new FontSource(
+            inspected.Id,
+            string.Empty,
+            -1,
+            fileName,
+            inspected.ContentType,
+            inspected.Size,
+            indexedFont.Path);
+        return new CachedOpenTypeFile(file, source);
     }
 
     private static InspectedStream InspectStream(SKStreamAsset stream)
@@ -322,6 +444,44 @@ public sealed class SystemFontCatalog : ISystemFontCatalog, IDisposable
             while (true)
             {
                 var read = stream.Read(buffer, buffer.Length);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                if (size < signature.Length)
+                {
+                    var signatureBytes = Math.Min(read, signature.Length - checked((int)size));
+                    buffer.AsSpan(0, signatureBytes).CopyTo(signature.AsSpan(checked((int)size)));
+                }
+
+                hash.AppendData(buffer, 0, read);
+                size += read;
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+
+        var id = Convert.ToHexStringLower(hash.GetHashAndReset());
+        var (extension, contentType) = DetectFormat(signature);
+        return new InspectedStream(id, extension, contentType, size);
+    }
+
+    private static InspectedStream InspectStream(Stream stream)
+    {
+        stream.Position = 0;
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = ArrayPool<byte>.Shared.Rent(81920);
+        var signature = new byte[4];
+        long size = 0;
+
+        try
+        {
+            while (true)
+            {
+                var read = stream.Read(buffer, 0, buffer.Length);
                 if (read == 0)
                 {
                     break;
@@ -389,11 +549,15 @@ public sealed class SystemFontCatalog : ISystemFontCatalog, IDisposable
             or >= 'A' and <= 'F');
 
     private static string CreateSourceKey(string fontId, FontSource source) =>
-        string.Create(
-            CultureInfo.InvariantCulture,
-            $"{fontId}:{source.Family}:{source.StyleIndex}");
+        source.FilePath is null
+            ? string.Create(
+                CultureInfo.InvariantCulture,
+                $"{fontId}:skia:{source.Family}:{source.StyleIndex}")
+            : fontId + ":file:" + source.FilePath;
 
     private sealed record CachedFamily(IReadOnlyList<SystemFontFileDto> Files);
+
+    private sealed record CachedOpenTypeFile(SystemFontFileDto File, FontSource Source);
 
     private sealed record FontSource(
         string Id,
@@ -401,7 +565,8 @@ public sealed class SystemFontCatalog : ISystemFontCatalog, IDisposable
         int StyleIndex,
         string FileName,
         string ContentType,
-        long Size);
+        long Size,
+        string? FilePath = null);
 
     private sealed record InspectedStream(
         string Id,

@@ -3,7 +3,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>Jellyfin.Plugin.SubtitleFontBridge</RootNamespace>
     <AssemblyName>Jellyfin.Plugin.SubtitleFontBridge</AssemblyName>
-    <Description>A Jellyfin plugin for Windows servers that supplies Jellyfin Web with the fonts referenced by ASS/SSA subtitles.</Description>
+    <Description>A Jellyfin plugin that supplies Jellyfin Web with server-hosted fonts referenced by ASS/SSA subtitles.</Description>
     <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>

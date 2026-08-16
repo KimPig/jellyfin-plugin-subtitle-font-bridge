@@ -1,23 +1,8 @@
 # Subtitle Font Bridge
 
-A Jellyfin plugin that supplies Jellyfin Web with server-hosted fonts referenced by ASS/SSA subtitles.
+A Jellyfin 12 plugin that supplies compatible Jellyfin Web builds with server-hosted fonts referenced by ASS/SSA subtitles.
 
-`Jellyfin.Plugin.SubtitleFontBridge` reads a selected subtitle stream, extracts only the font families
-referenced by its styles and inline `\fn` overrides, and exposes matching fonts
-available to the server through authenticated HTTP endpoints.
-
-The catalog scans TTF, OTF, TTC, and OTC files and reads every OpenType
-`Font Family` (name ID 1) and `Typographic Family` (name ID 16) record across
-all platforms and languages. This allows an ASS name such as a localized Korean
-family alias to resolve even when SkiaSharp exposes only the English family
-name. Names are normalized with Unicode Form KC, whitespace collapsing,
-case-insensitive comparison, and removal of the vertical-font `@` prefix.
-
-The plugin does not copy fonts into its data directory. Font bytes are opened
-from their original server path only when a family is requested. TTF, OTF,
-TTC, and OTC files discovered from disk, plus resources available only through
-the platform font manager, are identified by a SHA-256 content id, so
-multiple faces from the same TTC collection are sent only once.
+Download the ready-to-install ZIP from [GitHub Releases](https://github.com/KimPig/jellyfin-plugin-subtitle-font-bridge/releases).
 
 ## Required Jellyfin Web
 
@@ -25,6 +10,32 @@ This plugin does not work with the stock Jellyfin Web client by itself. It
 requires [KimPig's customized Jellyfin Web](https://github.com/KimPig/jellyfin-web),
 which includes the client-side integration for Subtitle Font Bridge. Install
 the customized Web build and this server plugin together.
+
+## Catalog installation
+
+Add the shared KimPig plugin repository in **Dashboard > Plugins > Repositories**:
+
+```text
+https://raw.githubusercontent.com/KimPig/jellyfin-plugin-repository/main/manifest.json
+```
+
+Use `KimPig Jellyfin Plugins` as the repository name. After saving it, open the
+plugin catalog, install Subtitle Font Bridge, and restart Jellyfin Server.
+The same catalog also provides Attachment Optimizer.
+
+## What it does
+
+- Reads the selected ASS/SSA subtitle stream and collects the font families used by styles and inline `\fn` overrides.
+- Scans TTF, OTF, TTC, and OTC files available to the Jellyfin server account.
+- Indexes every OpenType `Font Family` (name ID 1) and `Typographic Family` (name ID 16) record across all platforms and languages.
+- Normalizes names with Unicode Form KC, collapsed whitespace, case-insensitive matching, and removal of the vertical-font `@` prefix.
+- Exposes only the matching font resources through authenticated HTTP endpoints.
+- Uses SHA-256 content identifiers so multiple faces from the same TTC collection are sent only once.
+
+This multilingual OpenType lookup allows a localized ASS family name to resolve
+even when the platform font manager exposes only an English family name. The
+plugin does not copy fonts into its data directory; matching font bytes are
+opened from their original server path only when requested.
 
 ## Compatibility
 
@@ -92,18 +103,6 @@ artifacts/SubtitleFontBridge_12.0.0.0.zip
 
 The ZIP contains `Jellyfin.Plugin.SubtitleFontBridge.dll` and `meta.json`. Jellyfin
 supplies the controller, model, ASP.NET Core, and SkiaSharp runtime assemblies.
-
-## Catalog installation
-
-Add the shared KimPig plugin repository in **Dashboard > Plugins > Repositories**:
-
-```text
-https://raw.githubusercontent.com/KimPig/jellyfin-plugin-repository/main/manifest.json
-```
-
-Use `KimPig Jellyfin Plugins` as the repository name. After saving it, open the
-plugin catalog, install Subtitle Font Bridge, and restart Jellyfin Server.
-The same catalog also provides Attachment Optimizer.
 
 ## Manual installation
 

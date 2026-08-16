@@ -1,6 +1,7 @@
 using Jellyfin.Plugin.SubtitleFontBridge.Models;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.MediaEncoding;
+using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.SubtitleFontBridge.Services;
 
@@ -12,6 +13,7 @@ public sealed class SubtitleFontResolver : ISubtitleFontResolver
     private readonly ISubtitleEncoder _subtitleEncoder;
     private readonly IAssFontParser _assFontParser;
     private readonly ISystemFontCatalog _fontCatalog;
+    private readonly ILogger<SubtitleFontResolver> _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SubtitleFontResolver"/> class.
@@ -19,11 +21,13 @@ public sealed class SubtitleFontResolver : ISubtitleFontResolver
     public SubtitleFontResolver(
         ISubtitleEncoder subtitleEncoder,
         IAssFontParser assFontParser,
-        ISystemFontCatalog fontCatalog)
+        ISystemFontCatalog fontCatalog,
+        ILogger<SubtitleFontResolver> logger)
     {
         _subtitleEncoder = subtitleEncoder;
         _assFontParser = assFontParser;
         _fontCatalog = fontCatalog;
+        _logger = logger;
     }
 
     /// <inheritdoc />
@@ -50,6 +54,16 @@ public sealed class SubtitleFontResolver : ISubtitleFontResolver
             .ExtractFamiliesAsync(subtitleStream, cancellationToken)
             .ConfigureAwait(false);
 
-        return _fontCatalog.ResolveFamilies(families);
+        var resolution = _fontCatalog.ResolveFamilies(families);
+        _logger.LogInformation(
+            "Resolved ASS fonts for item {ItemId}, media source {MediaSourceId}, subtitle {SubtitleIndex}: requested [{RequestedFamilies}], missing [{MissingFamilies}], files [{FontFiles}]",
+            item.Id,
+            mediaSourceId,
+            subtitleIndex,
+            string.Join(", ", resolution.RequestedFamilies),
+            string.Join(", ", resolution.MissingFamilies),
+            string.Join(", ", resolution.Files.Select(static file => file.FileName)));
+
+        return resolution;
     }
 }

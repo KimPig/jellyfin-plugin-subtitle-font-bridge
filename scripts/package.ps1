@@ -9,7 +9,8 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $projectRoot "src\Jellyfin.Plugin.SubtitleFontBridge\Jellyfin.Plugin.SubtitleFontBridge.csproj"
 $publishDirectory = Join-Path $projectRoot "artifacts\publish"
-$archive = Join-Path $projectRoot "artifacts\SubtitleFontBridge_1.0.0.0.zip"
+$version = (Select-Xml -Path (Join-Path $projectRoot "Directory.Build.props") -XPath "/Project/PropertyGroup/Version").Node.InnerText
+$archive = Join-Path $projectRoot "artifacts\SubtitleFontBridge_$version.zip"
 
 & $DotnetPath publish $project `
     --configuration $Configuration `

@@ -87,7 +87,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\package.ps1
 The packaging script creates:
 
 ```text
-artifacts/SubtitleFontBridge_1.0.0.0.zip
+artifacts/SubtitleFontBridge_12.0.0.0.zip
 ```
 
 The ZIP contains `Jellyfin.Plugin.SubtitleFontBridge.dll` and `meta.json`. Jellyfin
@@ -97,7 +97,7 @@ supplies the controller, model, ASP.NET Core, and SkiaSharp runtime assemblies.
 
 1. Stop Jellyfin Server.
 2. Create a versioned directory below Jellyfin's plugin directory, for example
-   `plugins/Subtitle Font Bridge_1.0.0.0`.
+   `plugins/Subtitle Font Bridge_12.0.0.0`.
 3. Extract `Jellyfin.Plugin.SubtitleFontBridge.dll` and `meta.json` into that directory.
 4. Start Jellyfin and check `GET SubtitleFontBridge/Status` as an administrator.
 

@@ -181,6 +181,9 @@ public sealed class SubtitleFontBridgeController : ControllerBase
             _fontCatalog.FontFamilyCount,
             _fontCatalog.CachedFamilyCount,
             _fontCatalog.IndexedFileCount,
-            version));
+            version,
+            _fontCatalog.SearchServerFonts,
+            _fontCatalog.SearchAttachmentOptimizerCache,
+            _fontCatalog.AttachmentOptimizerAvailable));
     }
 }

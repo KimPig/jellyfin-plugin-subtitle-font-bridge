@@ -27,6 +27,8 @@ The same catalog also provides Attachment Optimizer.
 
 - Reads the selected ASS/SSA subtitle stream and collects the font families used by styles and inline `\fn` overrides.
 - Scans TTF, OTF, TTC, and OTC files available to the Jellyfin server account.
+- Optionally searches fonts already extracted into Attachment Optimizer's content-addressed cache.
+- Watches enabled font sources and invalidates the affected in-memory index when files change.
 - Indexes every OpenType `Font Family` (name ID 1) and `Typographic Family` (name ID 16) record across all platforms and languages.
 - Normalizes names with Unicode Form KC, collapsed whitespace, case-insensitive matching, and removal of the vertical-font `@` prefix.
 - Exposes only the matching font resources through authenticated HTTP endpoints.
@@ -36,6 +38,22 @@ This multilingual OpenType lookup allows a localized ASS family name to resolve
 even when the platform font manager exposes only an English family name. The
 plugin does not copy fonts into its data directory; matching font bytes are
 opened from their original server path only when requested.
+
+## Configuration
+
+Open **Dashboard > Plugins > Subtitle Font Bridge**. Both font sources are
+enabled by default:
+
+- **Use fonts installed on the server OS** searches the standard system and
+  user font directories visible to the Jellyfin service account.
+- **Use the Attachment Optimizer font cache** searches deduplicated fonts that
+  Attachment Optimizer has already extracted. This option is effective only
+  while Attachment Optimizer is installed, enabled, and supported. Server OS
+  fonts take priority when both sources contain the requested family.
+
+The Optimizer option remains saved when the companion plugin is unavailable,
+so installing Attachment Optimizer and restarting Jellyfin activates it without
+changing the Bridge setting again.
 
 ## Compatibility
 
@@ -52,7 +70,8 @@ The catalog checks these standard locations for the account running Jellyfin:
 - macOS: `/System/Library/Fonts`, `/Library/Fonts`, and `~/Library/Fonts`
 
 SkiaSharp remains a fallback for platform fonts that do not have a directly
-enumerable file. Restart Jellyfin after installing or removing fonts.
+enumerable file. Font directory changes are detected while Jellyfin is running;
+a Jellyfin restart is still required after installing or enabling a plugin.
 
 ## API
 
@@ -98,7 +117,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\package.ps1
 The packaging script creates:
 
 ```text
-artifacts/SubtitleFontBridge_12.0.0.1.zip
+artifacts/SubtitleFontBridge_12.0.0.2.zip
 ```
 
 The ZIP contains `Jellyfin.Plugin.SubtitleFontBridge.dll` and `meta.json`. Jellyfin
@@ -108,7 +127,7 @@ supplies the controller, model, ASP.NET Core, and SkiaSharp runtime assemblies.
 
 1. Stop Jellyfin Server.
 2. Create a versioned directory below Jellyfin's plugin directory, for example
-   `plugins/Subtitle Font Bridge_12.0.0.1`.
+   `plugins/Subtitle Font Bridge_12.0.0.2`.
 3. Extract `Jellyfin.Plugin.SubtitleFontBridge.dll` and `meta.json` into that directory.
 4. Start Jellyfin and check `GET SubtitleFontBridge/Status` as an administrator.
 
@@ -132,10 +151,9 @@ C:\ProgramData\Jellyfin\Server\plugins
 
 ## Current scope
 
-This first version deliberately has no configuration page and no persistent
-font cache. The first request builds the lightweight OpenType name index and
-hashes only the files matching the requested family; later requests during the
-same server session reuse both results. This keeps startup fast while avoiding
-the platform font manager's localized-name limitation. Adding bounded
-background indexing, custom font directories, and allow/deny lists are separate
-follow-up changes.
+The first request builds each enabled source's lightweight OpenType name index
+and hashes only files matching a requested family. Later requests during the
+same server session reuse those results. File-system notifications invalidate
+the lazy index after source changes, while missing or disabled sources preserve
+the Web client's normal embedded-font fallback. Persistent index metadata,
+custom font directories, and allow/deny lists remain possible follow-up work.

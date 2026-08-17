@@ -1,8 +1,8 @@
 <Project>
   <PropertyGroup>
-    <Version>12.0.0.1</Version>
-    <AssemblyVersion>12.0.0.1</AssemblyVersion>
-    <FileVersion>12.0.0.1</FileVersion>
+    <Version>12.0.0.2</Version>
+    <AssemblyVersion>12.0.0.2</AssemblyVersion>
+    <FileVersion>12.0.0.2</FileVersion>
     <Authors>KimPig</Authors>
     <Company>KimPig</Company>
     <Product>Subtitle Font Bridge</Product>

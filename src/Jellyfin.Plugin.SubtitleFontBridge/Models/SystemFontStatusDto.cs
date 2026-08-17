@@ -9,4 +9,7 @@ public sealed record SystemFontStatusDto(
     int FontFamilyCount,
     int CachedFamilyCount,
     int IndexedFileCount,
-    string SkiaSharpVersion);
+    string SkiaSharpVersion,
+    bool SearchServerFonts,
+    bool SearchAttachmentOptimizerCache,
+    bool AttachmentOptimizerAvailable);

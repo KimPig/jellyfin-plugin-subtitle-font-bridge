@@ -24,6 +24,21 @@ public interface ISystemFontCatalog
     int IndexedFileCount { get; }
 
     /// <summary>
+    /// Gets a value indicating whether server operating-system fonts are enabled.
+    /// </summary>
+    bool SearchServerFonts { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether the Attachment Optimizer cache is enabled in settings.
+    /// </summary>
+    bool SearchAttachmentOptimizerCache { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether Attachment Optimizer is installed, enabled, and supported.
+    /// </summary>
+    bool AttachmentOptimizerAvailable { get; }
+
+    /// <summary>
     /// Resolves a bounded collection of font family names.
     /// </summary>
     SystemFontResolutionDto ResolveFamilies(IEnumerable<string> families);

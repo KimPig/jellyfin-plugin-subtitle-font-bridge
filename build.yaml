@@ -1,17 +1,17 @@
 ---
 name: "Subtitle Font Bridge"
 guid: "81ea0bd3-d8e0-4f4a-b680-bf8b83a673f7"
-version: "12.0.0.1"
+version: "12.0.0.2"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
-overview: "A Jellyfin plugin for Windows servers that supplies Jellyfin Web with the fonts referenced by ASS/SSA subtitles."
+overview: "A Jellyfin plugin that supplies Jellyfin Web with fonts referenced by ASS/SSA subtitles."
 description: >
-  A Jellyfin plugin for Windows servers that supplies Jellyfin Web with the
-  fonts referenced by ASS/SSA subtitles.
+  Supplies compatible Jellyfin Web builds with matching server OS fonts and
+  fonts cached by Attachment Optimizer.
 category: "Subtitles"
 owner: "KimPig"
 artifacts:
 - "Jellyfin.Plugin.SubtitleFontBridge.dll"
 changelog: |-
-  - Log requested, missing, and returned subtitle fonts.
-  - Support embedded-font retry in the matching customized Web release.
+  - Add configurable server OS and Attachment Optimizer font sources, enabled by default.
+  - Detect the installed Attachment Optimizer plugin and watch enabled font sources for changes.

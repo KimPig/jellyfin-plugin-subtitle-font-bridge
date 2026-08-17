@@ -1,6 +1,8 @@
+using System.Globalization;
 using Jellyfin.Plugin.SubtitleFontBridge.Configuration;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
+using MediaBrowser.Model.Plugins;
 using MediaBrowser.Model.Serialization;
 
 namespace Jellyfin.Plugin.SubtitleFontBridge;
@@ -8,7 +10,7 @@ namespace Jellyfin.Plugin.SubtitleFontBridge;
 /// <summary>
 /// The Subtitle Font Bridge plugin.
 /// </summary>
-public sealed class Plugin : BasePlugin<PluginConfiguration>
+public sealed class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
 {
     /// <summary>
     /// The common prefix for every plugin API route.
@@ -45,4 +47,20 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>
     /// Gets the loaded plugin instance.
     /// </summary>
     public static Plugin? Instance { get; private set; }
+
+    /// <inheritdoc />
+    public IEnumerable<PluginPageInfo> GetPages()
+    {
+        return
+        [
+            new PluginPageInfo
+            {
+                Name = Name,
+                EmbeddedResourcePath = string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0}.Configuration.configPage.html",
+                    GetType().Namespace)
+            }
+        ];
+    }
 }

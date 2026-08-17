@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Subtitle Font Bridge</title>
+</head>
+<body>
+    <div id="SubtitleFontBridgeConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-button,emby-checkbox">
+        <div data-role="content">
+            <div class="content-primary">
+                <form id="SubtitleFontBridgeConfigForm">
+                    <h2>Font sources</h2>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="SearchServerFonts" type="checkbox" is="emby-checkbox" />
+                            <span>Use fonts installed on the server OS</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">Search system and user font directories available to the Jellyfin Server account.</div>
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="SearchAttachmentOptimizerCache" type="checkbox" is="emby-checkbox" />
+                            <span>Use the Attachment Optimizer font cache</span>
+                        </label>
+                        <div id="OptimizerCacheDescription" class="fieldDescription checkboxFieldDescription">Use matching fonts already extracted and deduplicated by Attachment Optimizer.</div>
+                    </div>
+
+                    <div class="fieldDescription" style="margin: 1.5em 0;">Server fonts take priority. Changes apply to new subtitle font requests without restarting Jellyfin.</div>
+                    <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                        <span>Save</span>
+                    </button>
+                </form>
+            </div>
+        </div>
+        <script type="text/javascript">
+            var SubtitleFontBridgeConfig = {
+                pluginUniqueId: '81ea0bd3-d8e0-4f4a-b680-bf8b83a673f7'
+            };
+
+            function updateSubtitleFontBridgeAvailability(status) {
+                var input = document.querySelector('#SearchAttachmentOptimizerCache');
+                var description = document.querySelector('#OptimizerCacheDescription');
+                var available = status && status.AttachmentOptimizerAvailable;
+                input.disabled = !available;
+                description.textContent = available
+                    ? 'Use matching fonts already extracted and deduplicated by Attachment Optimizer.'
+                    : 'Attachment Optimizer is not installed and enabled. This option will become available after installation and a Jellyfin restart.';
+            }
+
+            document.querySelector('#SubtitleFontBridgeConfigPage')
+                .addEventListener('pageshow', function() {
+                    Dashboard.showLoadingMsg();
+                    Promise.all([
+                        ApiClient.getPluginConfiguration(SubtitleFontBridgeConfig.pluginUniqueId),
+                        ApiClient.getJSON(ApiClient.getUrl('SubtitleFontBridge/Status')).catch(function() { return null; })
+                    ]).then(function(values) {
+                        var config = values[0];
+                        document.querySelector('#SearchServerFonts').checked = config.SearchServerFonts;
+                        document.querySelector('#SearchAttachmentOptimizerCache').checked = config.SearchAttachmentOptimizerCache;
+                        updateSubtitleFontBridgeAvailability(values[1]);
+                        Dashboard.hideLoadingMsg();
+                    }, function() {
+                        Dashboard.hideLoadingMsg();
+                    });
+                });
+
+            document.querySelector('#SubtitleFontBridgeConfigForm')
+                .addEventListener('submit', function(event) {
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(SubtitleFontBridgeConfig.pluginUniqueId).then(function(config) {
+                        config.SearchServerFonts = document.querySelector('#SearchServerFonts').checked;
+                        config.SearchAttachmentOptimizerCache = document.querySelector('#SearchAttachmentOptimizerCache').checked;
+                        ApiClient.updatePluginConfiguration(SubtitleFontBridgeConfig.pluginUniqueId, config).then(function(result) {
+                            Dashboard.processPluginConfigurationUpdateResult(result);
+                        });
+                    });
+
+                    event.preventDefault();
+                    return false;
+                });
+        </script>
+    </div>
+</body>
+</html>

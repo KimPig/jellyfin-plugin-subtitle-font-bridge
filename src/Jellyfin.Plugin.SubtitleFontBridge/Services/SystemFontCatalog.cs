@@ -4,6 +4,8 @@ using System.Globalization;
 using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using Jellyfin.Plugin.SubtitleFontBridge.Models;
+using MediaBrowser.Common.Configuration;
+using MediaBrowser.Common.Plugins;
 using Microsoft.Extensions.Logging;
 using SkiaSharp;
 
@@ -16,24 +18,59 @@ public sealed class SystemFontCatalog : ISystemFontCatalog, IDisposable
 {
     private const int MaximumFamiliesPerRequest = 32;
     private const int MaximumFamilyNameLength = 256;
+    private const int SystemIndexRefreshFlag = 1;
+    private const int OptimizerIndexRefreshFlag = 2;
+    private static readonly Guid AttachmentOptimizerPluginId =
+        Guid.Parse("41341b7d-9374-4c82-824a-21d360036771");
 
     private readonly ILogger<SystemFontCatalog> _logger;
     private readonly SKFontManager _fontManager;
-    private readonly Lazy<OpenTypeFontIndex> _openTypeIndex;
+    private readonly IReadOnlyList<string> _systemFontDirectories;
+    private readonly string? _optimizerFontDirectory;
+    private readonly Func<FontSourceState> _fontSourceStateProvider;
     private readonly bool _includePlatformFallback;
+    private readonly bool _watchForChanges;
+    private readonly object _indexSync = new();
     private readonly ConcurrentDictionary<string, Lazy<CachedFamily>> _families =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, Lazy<CachedOpenTypeFile>> _openTypeFiles =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, FontSource> _sources =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<FileSystemWatcher> _systemWatchers = [];
+    private Lazy<OpenTypeFontIndex> _systemOpenTypeIndex;
+    private Lazy<OpenTypeFontIndex> _optimizerOpenTypeIndex;
+    private FontSourceState _fontSourceState;
+    private FileSystemWatcher? _optimizerWatcher;
+    private Timer? _indexRefreshTimer;
+    private int _pendingIndexRefreshFlags;
     private bool _disposed;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SystemFontCatalog"/> class.
     /// </summary>
     public SystemFontCatalog(ILogger<SystemFontCatalog> logger)
-        : this(logger, OpenTypeFontIndex.GetDefaultFontDirectories(), includePlatformFallback: true)
+        : this(
+            logger,
+            OpenTypeFontIndex.GetDefaultFontDirectories(),
+            includePlatformFallback: true)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SystemFontCatalog"/> class.
+    /// </summary>
+    public SystemFontCatalog(
+        ILogger<SystemFontCatalog> logger,
+        IApplicationPaths applicationPaths,
+        IPluginManager pluginManager)
+        : this(
+            logger,
+            OpenTypeFontIndex.GetDefaultFontDirectories(),
+            Path.Combine(applicationPaths.DataPath, "attachment-optimizer", "objects", "sha256"),
+            includePlatformFallback: true,
+            () => GetConfiguredFontSources(pluginManager),
+            watchForChanges: true)
     {
     }
 
@@ -41,22 +78,61 @@ public sealed class SystemFontCatalog : ISystemFontCatalog, IDisposable
         ILogger<SystemFontCatalog> logger,
         IEnumerable<string> fontDirectories,
         bool includePlatformFallback)
+        : this(
+            logger,
+            fontDirectories,
+            optimizerFontDirectory: null,
+            includePlatformFallback,
+            static () => new FontSourceState(true, false, false),
+            watchForChanges: false)
+    {
+    }
+
+    internal SystemFontCatalog(
+        ILogger<SystemFontCatalog> logger,
+        IEnumerable<string> fontDirectories,
+        string? optimizerFontDirectory,
+        bool includePlatformFallback,
+        Func<FontSourceState> fontSourceStateProvider,
+        bool watchForChanges)
     {
         _logger = logger;
         _fontManager = SKFontManager.CreateDefault();
         _includePlatformFallback = includePlatformFallback;
-        var directories = fontDirectories
+        _watchForChanges = watchForChanges;
+        _fontSourceStateProvider = fontSourceStateProvider;
+        _systemFontDirectories = fontDirectories
             .Where(static path => !string.IsNullOrWhiteSpace(path))
             .Select(Path.GetFullPath)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        _openTypeIndex = new Lazy<OpenTypeFontIndex>(
-            () => OpenTypeFontIndex.Build(directories, _logger),
-            LazyThreadSafetyMode.ExecutionAndPublication);
+        _optimizerFontDirectory = string.IsNullOrWhiteSpace(optimizerFontDirectory)
+            ? null
+            : Path.GetFullPath(optimizerFontDirectory);
+        _systemOpenTypeIndex = CreateIndex(_systemFontDirectories);
+        _optimizerOpenTypeIndex = CreateIndex(GetOptimizerDirectories());
+        _fontSourceState = _fontSourceStateProvider();
+
+        if (_watchForChanges)
+        {
+            _indexRefreshTimer = new Timer(
+                static state => ((SystemFontCatalog)state!).RefreshPendingIndexes(),
+                this,
+                Timeout.InfiniteTimeSpan,
+                Timeout.InfiniteTimeSpan);
+            foreach (var directory in _systemFontDirectories)
+            {
+                TryAddSystemWatcher(directory);
+            }
+
+            EnsureOptimizerWatcher(_fontSourceState);
+        }
+
         _logger.LogInformation(
-            "Subtitle Font Bridge initialized with {FamilyCount} platform font families and {DirectoryCount} font directories",
+            "Subtitle Font Bridge initialized with {FamilyCount} platform font families, {DirectoryCount} server font directories, and optimizer availability {OptimizerAvailable}",
             _fontManager.FontFamilyCount,
-            directories.Length);
+            _systemFontDirectories.Count,
+            _fontSourceState.AttachmentOptimizerAvailable);
     }
 
     /// <inheritdoc />
@@ -72,10 +148,24 @@ public sealed class SystemFontCatalog : ISystemFontCatalog, IDisposable
         .Count();
 
     /// <inheritdoc />
+    public bool SearchServerFonts => EnsureFontSourceState().SearchServerFonts;
+
+    /// <inheritdoc />
+    public bool SearchAttachmentOptimizerCache =>
+        EnsureFontSourceState().SearchAttachmentOptimizerCache;
+
+    /// <inheritdoc />
+    public bool AttachmentOptimizerAvailable =>
+        EnsureFontSourceState().AttachmentOptimizerAvailable;
+
+    /// <inheritdoc />
     public SystemFontResolutionDto ResolveFamilies(IEnumerable<string> families)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(families);
+
+        var sourceState = EnsureFontSourceState();
+        EnsureOptimizerWatcher(sourceState);
 
         var requested = NormalizeFamilies(families);
         var resolvedFamilies = new List<ResolvedFontFamilyDto>(requested.Count);
@@ -227,8 +317,15 @@ public sealed class SystemFontCatalog : ISystemFontCatalog, IDisposable
             return;
         }
 
-        _fontManager.Dispose();
         _disposed = true;
+        _indexRefreshTimer?.Dispose();
+        foreach (var watcher in _systemWatchers)
+        {
+            watcher.Dispose();
+        }
+
+        _optimizerWatcher?.Dispose();
+        _fontManager.Dispose();
         GC.SuppressFinalize(this);
     }
 
@@ -276,8 +373,11 @@ public sealed class SystemFontCatalog : ISystemFontCatalog, IDisposable
     {
         try
         {
-            var openTypeFiles = BuildOpenTypeFamily(family);
-            if (openTypeFiles.Count > 0 || !_includePlatformFallback)
+            var sourceState = EnsureFontSourceState();
+            var openTypeFiles = BuildOpenTypeFamily(family, sourceState);
+            if (openTypeFiles.Count > 0
+                || !sourceState.SearchServerFonts
+                || !_includePlatformFallback)
             {
                 _logger.LogDebug(
                     "Resolved OpenType font alias {Family} to {FileCount} unique files",
@@ -370,10 +470,29 @@ public sealed class SystemFontCatalog : ISystemFontCatalog, IDisposable
         }
     }
 
-    private IReadOnlyList<SystemFontFileDto> BuildOpenTypeFamily(string family)
+    private IReadOnlyList<SystemFontFileDto> BuildOpenTypeFamily(
+        string family,
+        FontSourceState sourceState)
     {
         var files = new Dictionary<string, FontFileBuilder>(StringComparer.OrdinalIgnoreCase);
-        foreach (var indexedFont in _openTypeIndex.Value.Find(family))
+        IReadOnlyList<OpenTypeFontIndex.IndexedOpenTypeFont> indexedFonts = [];
+        var sourceName = "none";
+        if (sourceState.SearchServerFonts)
+        {
+            indexedFonts = Volatile.Read(ref _systemOpenTypeIndex).Value.Find(family);
+            sourceName = "server-os";
+        }
+
+        if (indexedFonts.Count == 0
+            && sourceState.SearchAttachmentOptimizerCache
+            && sourceState.AttachmentOptimizerAvailable)
+        {
+            EnsureOptimizerWatcher(sourceState);
+            indexedFonts = Volatile.Read(ref _optimizerOpenTypeIndex).Value.Find(family);
+            sourceName = "optimizer-cache";
+        }
+
+        foreach (var indexedFont in indexedFonts)
         {
             var cached = _openTypeFiles.GetOrAdd(
                 indexedFont.Path,
@@ -391,6 +510,14 @@ public sealed class SystemFontCatalog : ISystemFontCatalog, IDisposable
             {
                 builder.AddFaces(cached.File.Faces);
             }
+        }
+
+        if (files.Count > 0)
+        {
+            _logger.LogDebug(
+                "Resolved font family {Family} from {FontSource}",
+                family,
+                sourceName);
         }
 
         return files.Values.Select(static builder => builder.Build()).ToArray();
@@ -542,6 +669,199 @@ public sealed class SystemFontCatalog : ISystemFontCatalog, IDisposable
         return ("font", "application/octet-stream");
     }
 
+    private static FontSourceState GetConfiguredFontSources(IPluginManager pluginManager)
+    {
+        var configuration = Plugin.Instance?.Configuration ?? new Configuration.PluginConfiguration();
+        var optimizerAvailable = pluginManager.Plugins.Any(static plugin =>
+            plugin.Id == AttachmentOptimizerPluginId && plugin.IsEnabledAndSupported);
+        return new FontSourceState(
+            configuration.SearchServerFonts,
+            configuration.SearchAttachmentOptimizerCache,
+            optimizerAvailable);
+    }
+
+    private Lazy<OpenTypeFontIndex> CreateIndex(IEnumerable<string> directories)
+    {
+        var paths = directories.ToArray();
+        return new Lazy<OpenTypeFontIndex>(
+            () => OpenTypeFontIndex.Build(paths, _logger),
+            LazyThreadSafetyMode.ExecutionAndPublication);
+    }
+
+    private IEnumerable<string> GetOptimizerDirectories()
+    {
+        if (_optimizerFontDirectory is not null)
+        {
+            yield return _optimizerFontDirectory;
+        }
+    }
+
+    private FontSourceState EnsureFontSourceState()
+    {
+        var current = _fontSourceStateProvider();
+        if (current == _fontSourceState)
+        {
+            return current;
+        }
+
+        lock (_indexSync)
+        {
+            if (current != _fontSourceState)
+            {
+                _fontSourceState = current;
+                ClearResolutionCaches();
+                _logger.LogInformation(
+                    "Subtitle font sources changed: server OS {ServerFontsEnabled}, optimizer cache {OptimizerCacheEnabled}, optimizer available {OptimizerAvailable}",
+                    current.SearchServerFonts,
+                    current.SearchAttachmentOptimizerCache,
+                    current.AttachmentOptimizerAvailable);
+            }
+        }
+
+        return current;
+    }
+
+    private void ClearResolutionCaches()
+    {
+        _families.Clear();
+        _openTypeFiles.Clear();
+        _sources.Clear();
+    }
+
+    private void TryAddSystemWatcher(string directory)
+    {
+        if (!Directory.Exists(directory))
+        {
+            return;
+        }
+
+        try
+        {
+            var watcher = CreateWatcher(directory, SystemIndexRefreshFlag);
+            _systemWatchers.Add(watcher);
+        }
+        catch (Exception exception) when (exception is IOException
+                                           or UnauthorizedAccessException
+                                           or ArgumentException)
+        {
+            _logger.LogDebug(exception, "Unable to watch server font directory {FontDirectory}", directory);
+        }
+    }
+
+    private void EnsureOptimizerWatcher(FontSourceState sourceState)
+    {
+        if (!_watchForChanges
+            || !sourceState.SearchAttachmentOptimizerCache
+            || !sourceState.AttachmentOptimizerAvailable
+            || _optimizerFontDirectory is null
+            || _optimizerWatcher is not null
+            || !Directory.Exists(_optimizerFontDirectory))
+        {
+            return;
+        }
+
+        lock (_indexSync)
+        {
+            if (_optimizerWatcher is not null || !Directory.Exists(_optimizerFontDirectory))
+            {
+                return;
+            }
+
+            try
+            {
+                _optimizerWatcher = CreateWatcher(
+                    _optimizerFontDirectory,
+                    OptimizerIndexRefreshFlag);
+                Volatile.Write(ref _optimizerOpenTypeIndex, CreateIndex(GetOptimizerDirectories()));
+                _families.Clear();
+                _logger.LogInformation(
+                    "Watching Attachment Optimizer font cache {FontDirectory}",
+                    _optimizerFontDirectory);
+            }
+            catch (Exception exception) when (exception is IOException
+                                               or UnauthorizedAccessException
+                                               or ArgumentException)
+            {
+                _logger.LogDebug(
+                    exception,
+                    "Unable to watch Attachment Optimizer font cache {FontDirectory}",
+                    _optimizerFontDirectory);
+            }
+        }
+    }
+
+    private FileSystemWatcher CreateWatcher(string directory, int refreshFlag)
+    {
+        var watcher = new FileSystemWatcher(directory)
+        {
+            IncludeSubdirectories = true,
+            NotifyFilter = NotifyFilters.FileName
+                           | NotifyFilters.DirectoryName
+                           | NotifyFilters.LastWrite
+                           | NotifyFilters.Size
+        };
+        FileSystemEventHandler changed = (_, _) => ScheduleIndexRefresh(refreshFlag);
+        RenamedEventHandler renamed = (_, _) => ScheduleIndexRefresh(refreshFlag);
+        ErrorEventHandler error = (_, eventArgs) =>
+        {
+            _logger.LogWarning(
+                eventArgs.GetException(),
+                "Font directory watcher overflowed; the index will be rebuilt");
+            ScheduleIndexRefresh(refreshFlag);
+        };
+        watcher.Created += changed;
+        watcher.Changed += changed;
+        watcher.Deleted += changed;
+        watcher.Renamed += renamed;
+        watcher.Error += error;
+        watcher.EnableRaisingEvents = true;
+        return watcher;
+    }
+
+    private void ScheduleIndexRefresh(int refreshFlag)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        Interlocked.Or(ref _pendingIndexRefreshFlags, refreshFlag);
+        try
+        {
+            _indexRefreshTimer?.Change(TimeSpan.FromSeconds(1), Timeout.InfiniteTimeSpan);
+        }
+        catch (ObjectDisposedException)
+        {
+            // The plugin is shutting down.
+        }
+    }
+
+    private void RefreshPendingIndexes()
+    {
+        var refreshFlags = Interlocked.Exchange(ref _pendingIndexRefreshFlags, 0);
+        if (_disposed || refreshFlags == 0)
+        {
+            return;
+        }
+
+        lock (_indexSync)
+        {
+            if ((refreshFlags & SystemIndexRefreshFlag) != 0)
+            {
+                Volatile.Write(ref _systemOpenTypeIndex, CreateIndex(_systemFontDirectories));
+            }
+
+            if ((refreshFlags & OptimizerIndexRefreshFlag) != 0)
+            {
+                Volatile.Write(ref _optimizerOpenTypeIndex, CreateIndex(GetOptimizerDirectories()));
+            }
+
+            ClearResolutionCaches();
+        }
+
+        _logger.LogInformation("Subtitle font index invalidated after a font directory change");
+    }
+
     private static bool IsValidFontId(string fontId) =>
         fontId.Length == 64 && fontId.All(static character =>
             character is >= '0' and <= '9'
@@ -554,6 +874,11 @@ public sealed class SystemFontCatalog : ISystemFontCatalog, IDisposable
                 CultureInfo.InvariantCulture,
                 $"{fontId}:skia:{source.Family}:{source.StyleIndex}")
             : fontId + ":file:" + source.FilePath;
+
+    internal sealed record FontSourceState(
+        bool SearchServerFonts,
+        bool SearchAttachmentOptimizerCache,
+        bool AttachmentOptimizerAvailable);
 
     private sealed record CachedFamily(IReadOnlyList<SystemFontFileDto> Files);
 
